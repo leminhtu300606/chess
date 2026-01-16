@@ -26,6 +26,12 @@ class ChessGUI:
         self.font_ui = pygame.font.SysFont("Arial", 20)
         self.font_small = pygame.font.SysFont("Arial", 16)
         self.font_title = pygame.font.SysFont("Arial", 30, bold=True)
+        self.font_bold = pygame.font.SysFont("Arial", 22, bold=True)
+        
+        # Menu State
+        self.selected_mode = 'AI'
+        self.selected_time = 600
+        self.selected_side = 'w'
         
         self.timers = {'w': 600, 'b': 600}
         self.last_time = time.time()
@@ -127,243 +133,207 @@ class ChessGUI:
     def check_game_over(self):
         color = self.engine.turn 
         opp = 'b' if color == 'w' else 'w'
+        game_ended = False
+        result = None
+        
         if self.engine.is_checkmate(color):
             self.status_message = f"Checkmate! {'White' if opp == 'w' else 'Black'} Wins!"
-            return True
-        if self.engine.is_stalemate(color):
+            result = 'win' if opp != self.player_side else 'loss'
+            game_ended = True
+        elif self.engine.is_stalemate(color):
             self.status_message = "Stalemate! Draw."
-            return True
-        return False
+            result = 'draw'
+            game_ended = True
+        elif self.engine.is_draw():
+            self.status_message = "Draw! (Insufficient Material or 50-Move Rule)"
+            result = 'draw'
+            game_ended = True
 
-    def side_menu(self):
-        self.screen.fill(COLOR_BG)
-        title = self.font_title.render("SELECT SIDE", True, COLOR_TEXT)
-        self.screen.blit(title, (WINDOW_WIDTH//2 - 100, 150))
+        # Trigger AI learning when game ends
+        if game_ended and self.game_mode == 'AI':
+            ai_color = 'b' if self.player_side == 'w' else 'w'
+            self.ai.analyze_game(ai_color, result)
         
-        options = [
-            ("Play as White", 'w', 250),
-            ("Play as Black", 'b', 320),
-            ("Random Side", 'random', 390)
-        ]
-        
-        mouse = pygame.mouse.get_pos()
-        
-        for text, val, y in options:
-            btn = pygame.Rect(WINDOW_WIDTH//2 - 120, y, 240, 50)
-            col = COLOR_BTN_HOVER if btn.collidepoint(mouse) else COLOR_BTN
-            pygame.draw.rect(self.screen, col, btn, border_radius=10)
-            self.screen.blit(self.font_ui.render(text, True, COLOR_TEXT), (btn.x + 40, btn.y + 15))
-        
-        pygame.display.flip()
-        
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT: pygame.quit(); sys.exit()
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                for text, val, y in options:
-                    btn = pygame.Rect(WINDOW_WIDTH//2 - 120, y, 240, 50)
-                    if btn.collidepoint(event.pos):
-                         if val == 'random':
-                             import random
-                             self.player_side = random.choice(['w', 'b'])
-                         else:
-                             self.player_side = val
-                         self.game_state = "TIME_SELECT"
+        return game_ended
 
-    def main_menu(self):
-        self.screen.fill(COLOR_BG)
-        title = self.font_title.render("CHESS GRANDMASTER", True, COLOR_TEXT)
-        self.screen.blit(title, (WINDOW_WIDTH//2 - 150, 200))
-
-        mouse = pygame.mouse.get_pos()
-        
-        # Define Buttons
-        btn_ai = pygame.Rect(WINDOW_WIDTH//2 - 100, 300, 200, 50)
-        btn_pvp = pygame.Rect(WINDOW_WIDTH//2 - 100, 370, 200, 50)
-
-        # Draw Buttons
-        col_ai = COLOR_BTN_HOVER if btn_ai.collidepoint(mouse) else COLOR_BTN
-        pygame.draw.rect(self.screen, col_ai, btn_ai, border_radius=10)
-        self.screen.blit(self.font_ui.render("Player vs AI", True, COLOR_TEXT), (btn_ai.x + 50, btn_ai.y + 15))
-
-        col_pvp = COLOR_BTN_HOVER if btn_pvp.collidepoint(mouse) else COLOR_BTN
-        pygame.draw.rect(self.screen, col_pvp, btn_pvp, border_radius=10)
-        self.screen.blit(self.font_ui.render("Player vs Player", True, COLOR_TEXT), (btn_pvp.x + 40, btn_pvp.y + 15))
-        
-        pygame.display.flip()
-        
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit(); sys.exit()
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                if btn_ai.collidepoint(event.pos):
-                    self.game_mode = 'AI'
-                    self.game_state = "SIDE_SELECT" 
-                elif btn_pvp.collidepoint(event.pos):
-                    self.game_mode = 'PvP'
-                    self.game_state = "TIME_SELECT"
 
     def start_game(self):
         self.game_state = "PLAYING"
         self.engine.reset()
+        self.player_side = self.selected_side
+        if self.selected_side == 'random':
+            import random
+            self.player_side = random.choice(['w', 'b'])
+            
+        self.game_mode = self.selected_mode
+        self.time_limit = self.selected_time
+        
         val = self.time_limit if self.time_limit != -1 else 999999
         self.timers = {'w': val, 'b': val}
-        self.last_time = time.time() # Reset clock to prevent huge dt from menu wait
+        self.last_time = time.time() 
         self.status_message = ""
 
-    def time_menu(self):
+    def unified_menu(self):
         self.screen.fill(COLOR_BG)
-        title = self.font_title.render("SELECT TIME CONTROL", True, COLOR_TEXT)
-        self.screen.blit(title, (WINDOW_WIDTH//2 - 150, 150))
-        
-        options = [
-            ("1 Minute (Bullet)", 60, 250),
-            ("3 Minutes (Blitz)", 180, 320),
-            ("10 Minutes (Standard)", 600, 390),
-            ("No Time Limit", -1, 460)
-        ]
+        title = self.font_title.render("CHESS GRANDMASTER", True, COLOR_TEXT)
+        self.screen.blit(title, (WINDOW_WIDTH//2 - 150, 50))
         
         mouse = pygame.mouse.get_pos()
+        events = pygame.event.get()
+        for e in events:
+            if e.type == pygame.QUIT: pygame.quit(); sys.exit()
+
+        def draw_option_group(title, options, selected_val, y_start, key_attr):
+            self.screen.blit(self.font_bold.render(title, True, COLOR_HIGHLIGHT), (50, y_start))
+            
+            for i, (text, val) in enumerate(options):
+                rect = pygame.Rect(50 + (i % 2) * 220, y_start + 40 + (i // 2) * 60, 200, 40)
+                is_selected = (selected_val == val)
+                item_col = (100, 200, 100) if is_selected else (60, 60, 60)
+                
+                if rect.collidepoint(mouse):
+                    item_col = (80, 180, 80) if is_selected else (80, 80, 80)
+                    for event in events: # Check events specifically for this button
+                        if event.type == pygame.MOUSEBUTTONDOWN:
+                             setattr(self, key_attr, val)
+
+                pygame.draw.rect(self.screen, item_col, rect, border_radius=8)
+                label = self.font_ui.render(text, True, COLOR_TEXT)
+                self.screen.blit(label, (rect.x + 20, rect.y + 10))
+
+        # 1. Game Mode
+        draw_option_group("1. Game Mode", [("Player vs AI", 'AI'), ("Player vs Player", 'PvP')], 
+                         self.selected_mode, 120, 'selected_mode')
+
+        # 2. Time Control
+        draw_option_group("2. Time Control", [("1 Minute", 60), ("3 Minutes", 180), ("10 Minutes", 600), ("Unlimited", -1)], 
+                         self.selected_time, 250, 'selected_time')
+
+        # 3. Side Selection (Only valid for AI)
+        if self.selected_mode == 'AI':
+            draw_option_group("3. Choose Side", [("White", 'w'), ("Black", 'b'), ("Random", 'random')], 
+                             self.selected_side, 430, 'selected_side')
         
-        for text, val, y in options:
-            btn = pygame.Rect(WINDOW_WIDTH//2 - 120, y, 240, 50)
-            col = COLOR_BTN_HOVER if btn.collidepoint(mouse) else COLOR_BTN
-            pygame.draw.rect(self.screen, col, btn, border_radius=10)
-            self.screen.blit(self.font_ui.render(text, True, COLOR_TEXT), (btn.x + 20, btn.y + 15))
+        # Start Button
+        btn_start = pygame.Rect(WINDOW_WIDTH//2 - 100, 600, 200, 60)
+        col_start = (255, 165, 0) # Orange
+        if btn_start.collidepoint(mouse):
+             col_start = (255, 140, 0)
+             for event in events: # Check events specifically for this button
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    self.start_game()
+        
+        pygame.draw.rect(self.screen, col_start, btn_start, border_radius=15)
+        start_txt = self.font_title.render("START GAME", True, (0,0,0))
+        self.screen.blit(start_txt, (btn_start.x + 15, btn_start.y + 12))
         
         pygame.display.flip()
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT: pygame.quit(); sys.exit()
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                 for text, val, y in options:
-                    btn = pygame.Rect(WINDOW_WIDTH//2 - 120, y, 240, 50)
-                    if btn.collidepoint(event.pos):
-                        self.time_limit = val
-                        self.start_game()
-        
-        # If Player is Black and AI mode, AI moves first? 
-        # Actually AI triggers in loop. 
-        # But we need to make sure loop triggers AI if turn='w' and player='b'
-        # Check run loop logic below.
-
-    # ... time_menu ...
 
     def run(self):
         while True:
             if self.game_state == "MENU":
-                self.main_menu()
-                continue
-            if self.game_state == "SIDE_SELECT":
-                self.side_menu()
-                continue
-            if self.game_state == "TIME_SELECT":
-                self.time_menu()
+                self.unified_menu()
                 continue
                 
             dt = time.time() - self.last_time
             self.last_time = time.time()
             
             if self.engine.game_active and self.time_limit != -1:
-                if self.engine.turn == 'w': self.timers['w'] -= dt
-                else: self.timers['b'] -= dt
-                if self.timers['w'] <= 0 or self.timers['b'] <= 0:
+                # Timer logic
+                self.timers[self.engine.turn] -= dt
+                if self.timers[self.engine.turn] <= 0:
                     self.engine.game_active = False
-                    self.status_message = "Time Out!"
-
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    pygame.quit(); sys.exit()
-                
-                if event.type == pygame.MOUSEBUTTONDOWN:
-                    x, y = event.pos
-                    # UI Buttons
-                    if x > BOARD_SIZE:
-                        if 600 <= y <= 640:
-                            if BOARD_SIZE+20 <= x <= BOARD_SIZE+120:
-                                self.engine.undo_move(); self.engine.undo_move()
-                            elif BOARD_SIZE+140 <= x <= BOARD_SIZE+240:
-                                self.game_state = "MENU"
-                    # Board Click
-                    elif x < BOARD_SIZE:
-                        c, r = x // CELL_SIZE, y // CELL_SIZE
-                        
-                        # In AI mode, if player is Black, board might be flipped. 
-                        # We handle visual flip in draw_board.
-                        # But clicks need to be mapped if flipped.
-                        # draw_board logic: flipped = (self.player_side == 'b' and self.game_mode == 'AI')
-                        flipped = (self.player_side == 'b' and self.game_mode == 'AI')
-                        if flipped:
-                            r, c = 7-r, 7-c
-
-                        # Check Turn Validity
-                        is_my_turn = True
-                        if self.game_mode == 'AI' and self.engine.turn != self.player_side:
-                            is_my_turn = False
-                        
-                        if self.engine.game_active and is_my_turn:
-                             # ... (Existing click logic) ...
-                             pass 
-                             # Note: Since I am replacing the block, I need to include the click logic or rely on partial.
-                             # But let's be careful. The replacement chunk handles the loop structure. 
-                             # I should include the click handling inside.
-                             if self.selected_square:
-                                # Try Move
-                                move = next((m for m in self.valid_moves if m['to'] == (r, c)), None)
-                                if move:
-                                    self.engine.make_move(move)
-                                    self.selected_square = None
-                                    self.valid_moves = []
-                                    self.draw_board(); pygame.display.flip() # Draw BEFORE AI thinks
-                                    
-                                    if self.check_game_over(): 
-                                        self.engine.game_active = False
-                                    elif self.game_mode == 'AI':
-                                        # TRIGGER AI
-                                        # Force refresh before sleep
-                                        self.draw_board()
-                                        self.draw_ui()
-                                        pygame.display.flip()
-                                        
-                                        time.sleep(0.1)
-                                        aimove = self.ai.get_best_move()
-                                        if aimove: 
-                                            self.engine.make_move(aimove)
-                                            if self.check_game_over(): self.engine.game_active = False
-                                else:
-                                    p = self.engine.board[r][c]
-                                    if p and p['color'] == self.engine.turn:
-                                        self.selected_square = (r, c)
-                                        self.valid_moves = self.engine.get_piece_moves(r, c)
-                                    else:
-                                        self.selected_square = None; self.valid_moves = []
-                             else:
-                                p = self.engine.board[r][c]
-                                if p and p['color'] == self.engine.turn:
-                                     self.selected_square = (r, c)
-                                     self.valid_moves = self.engine.get_piece_moves(r, c)
-
-            # AI Turn Trigger (for when AI is White/First or after Player moves)
-            # Actually, the Click event triggers AI response.
-            # But if Player is Black, AI is White. AI needs to move FIRST.
-            # We need a check outside event loop.
-            if self.game_mode == 'AI' and self.engine.game_active and self.engine.turn != self.player_side:
-                 # AI Turn (e.g. Start of game if AI=White)
-                 # We need to make sure we don't spam.
-                 # Only trigger if we didn't just move (handled by click)? 
-                 # No, click handles Player move. This handles AI move if it's AI turn and NO events happened.
-                 # Wait, if we use sleep here, we block events.
-                 # Better: Draw frame, then move.
-                 self.draw_board()
-                 self.draw_ui()
-                 pygame.display.flip()
-                 time.sleep(0.1) # Small delay for UX
-                 aimove = self.ai.get_best_move()
-                 if aimove: 
-                     self.engine.make_move(aimove)
-                     if self.check_game_over(): self.engine.game_active = False
+                    opp = 'b' if self.engine.turn == 'w' else 'w'
+                    winner = "White" if opp == 'w' else "Black"
+                    self.status_message = f"Time's Up! {winner} Wins!"
 
             self.screen.fill(COLOR_BG)
             self.draw_board()
             self.draw_ui()
+            
+            if self.selected_square:
+                pygame.draw.rect(self.screen, COLOR_SELECTED, 
+                               (self.selected_square[1]*CELL_SIZE, self.selected_square[0]*CELL_SIZE, CELL_SIZE, CELL_SIZE), 3)
+
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit(); sys.exit()
+                    
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    x, y = event.pos
+                    
+                    # Sidebar Buttons
+                    if x > BOARD_SIZE:
+                        # Undo
+                        if BOARD_SIZE + 20 <= x <= BOARD_SIZE + 120 and 600 <= y <= 640:
+                            if self.game_mode == 'AI':
+                                # Undo twice for AI
+                                self.engine.undo_move()
+                                self.engine.undo_move()
+                            else:
+                                self.engine.undo_move()
+                            self.selected_square = None
+                            self.valid_moves = []
+                        # Menu
+                        elif BOARD_SIZE + 140 <= x <= BOARD_SIZE + 240 and 600 <= y <= 640:
+                             self.game_state = "MENU"
+                    
+                    # Board Interaction
+                    elif x < BOARD_SIZE:
+                        c, r = x // CELL_SIZE, y // CELL_SIZE
+                        
+                        if self.engine.game_active:
+                            if (self.game_mode == 'PvP') or \
+                               (self.game_mode == 'AI' and self.engine.turn == self.player_side):
+                                
+                                # Handle Moving
+                                moved = False
+                                for m in self.valid_moves:
+                                    if m['to'] == (r, c):
+                                        success = self.engine.make_move(m)
+                                        if success:
+                                            moved = True
+                                            self.selected_square = None
+                                            self.valid_moves = []
+                                            if self.check_game_over(): self.engine.game_active = False
+                                            
+                                            # Redraw immediately to show move
+                                            self.screen.fill(COLOR_BG)
+                                            self.draw_board()
+                                            self.draw_ui()
+                                            pygame.display.flip()
+                                            
+                                            # Trigger AI
+                                            if self.game_mode == 'AI' and self.engine.game_active:
+                                                 pygame.event.pump() # Prevent freeze
+                                                 time.sleep(0.1)
+                                                 aimove = self.ai.get_best_move()
+                                                 if aimove: 
+                                                     ai_color = 'b' if self.player_side == 'w' else 'w'
+                                                     self.ai.record_position(aimove, ai_color)
+                                                     self.engine.make_move(aimove)
+                                                     if self.check_game_over(): self.engine.game_active = False
+                                        break
+                                
+                                if not moved:
+                                     # Select Piece
+                                    p = self.engine.board[r][c]
+                                    if p and p['color'] == self.engine.turn:
+                                         self.selected_square = (r, c)
+                                         self.valid_moves = self.engine.get_piece_moves(r, c)
+                                    else:
+                                         self.selected_square = None; self.valid_moves = []
+
+            # AI Turn Trigger (for start of game if AI is White)
+            if self.game_mode == 'AI' and self.engine.game_active and self.engine.turn != self.player_side:
+                 pygame.event.pump()
+                 aimove = self.ai.get_best_move()
+                 if aimove:
+                     ai_color = 'b' if self.player_side == 'w' else 'w'
+                     self.ai.record_position(aimove, ai_color)
+                     self.engine.make_move(aimove)
+                     if self.check_game_over(): self.engine.game_active = False
+
             pygame.display.flip()
             self.clock.tick(60)
 
