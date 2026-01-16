@@ -180,21 +180,33 @@ class ChessAI:
                                 score += 25
         
         # === NEW: PIECE BLOCKING PENALTY ===
-        # Check if this move blocks friendly pieces (especially bishop/queen diagonals)
+        # Check if this move blocks friendly long-range pieces (Bishop, Rook, Queen)
         blocking_penalty = 0
         for row in range(8):
             for col in range(8):
                 fp = self.engine.board[row][col]
-                if fp and fp['color'] == my_color and fp['type'] in ['b', 'q', 'r']:
-                    if fp['type'] in ['b', 'q']:  # Check diagonals
-                        for dr, dc in [(-1,-1), (-1,1), (1,-1), (1,1)]:
-                            nr, nc = row + dr, col + dc
-                            if (nr, nc) == (tr, tc):
-                                blocking_penalty -= 40  # Blocking a diagonal piece
-                    if fp['type'] in ['r', 'q']:  # Check files/ranks
-                        if row == tr or col == tc:
-                            # Check if we're between rook/queen and open space
-                            blocking_penalty -= 30
+                if fp and fp['color'] == my_color and fp['type'] in ['b', 'q', 'r'] and (row, col) != (fr, fc):
+                    # Check if (tr, tc) blocks the line of sight for this piece
+                    dr = tr - row
+                    dc = tc - col
+                    
+                    # Check if they are on same diagonal, rank or file
+                    is_diag = abs(dr) == abs(dc) and dr != 0
+                    is_line = (dr == 0 or dc == 0) and (dr != 0 or dc != 0)
+                    
+                    if (fp['type'] in ['b', 'q'] and is_diag) or (fp['type'] in ['r', 'q'] and is_line):
+                        # The move is on a line this piece could use
+                        # Penalty is higher if we're closer to the piece (blocking more potential)
+                        dist = max(abs(dr), abs(dc))
+                        # SEVERE PENALTY: blocks friendly piece's development
+                        # Penalty ranges from -150 (dist 1) to -50 (dist 4)
+                        blocking_penalty -= max(50, 180 - dist * 30)
+                        
+                        # Extra penalty for blocking a piece still on its home square
+                        home_row = 7 if my_color == 'w' else 0
+                        if row == home_row:
+                            blocking_penalty -= 50
+                            
         score += blocking_penalty
         
         # === NEW: ESCAPE ROUTE CHECK ===
@@ -322,13 +334,31 @@ class ChessAI:
         # 8. CAPTURE BONUS - Very important!
         if target:
             capture_val = self._get_piece_value(target)
-            score += capture_val + 50  # Big bonus for any capture
+            score += capture_val + 100  # Increased base bonus from 50 to 100
+            
             # MVV-LVA (Most Valuable Victim - Least Valuable Attacker)
             my_val = self._get_piece_value(piece)
             if capture_val >= my_val:
-                score += 100  # Great trade or win material
+                score += 150  # Increased from 100 - Great trade or win material
             elif capture_val >= my_val - 100:
-                score += 50  # Fair trade
+                score += 80   # Increased from 50 - Fair trade
+            
+            # === NEW: STRATEGIC EXCHANGE BONUS ===
+            # Bonus for removing opponent's developed minor pieces
+            if target['type'] in ['n', 'b']:
+                opp_back_rank = 0 if my_color == 'w' else 7
+                target_r, target_c = tr, tc
+                if target_r != opp_back_rank:
+                    score += 60  # Removing developed minor piece is great
+                
+                # Special bonus for same-color square capture (often Bishop vs Knight)
+                # Helps AI recognize the value of the specific exchange shown by user
+                if (fr + fc) % 2 == (target_r + target_c) % 2:
+                    score += 40  # Same-color square exchange bonus
+                    
+            # Bonus for removing the queen
+            if target['type'] == 'q':
+                score += 200  # Removing opponent queen is a top priority
         
         # 9. REPETITION PENALTY - Don't move back to where we came from!
         if len(self.engine.move_history) >= 2:
@@ -368,6 +398,93 @@ class ChessAI:
                     if support_piece and support_piece['type'] == 'p' and support_piece['color'] == my_color:
                         score += 15  # Supported by another pawn
         
+        # === 11. PROTECTION BONUS - Reward moves that defend valuable pieces ===
+        # After moving, check if we now defend any valuable friendly pieces
+        saved_from, saved_to = self.engine.board[fr][fc], self.engine.board[tr][tc]
+        self.engine.board[tr][tc] = piece
+        self.engine.board[fr][fc] = None
+        
+        protection_bonus = 0
+        # Get what squares we now attack
+        our_attacks = self.engine.get_piece_moves(tr, tc, check_legal=False)
+        for atk in our_attacks:
+            atk_r, atk_c = atk['to']
+            defended_piece = self.engine.board[atk_r][atk_c]
+            if defended_piece and defended_piece['color'] == my_color:
+                defended_val = self._get_piece_value(defended_piece)
+                my_val = self._get_piece_value(piece)
+                if defended_val > my_val:
+                    # We're defending a more valuable piece!
+                    protection_bonus += defended_val // 10
+                # Extra bonus for defending king
+                if defended_piece['type'] == 'k':
+                    protection_bonus += 50
+        
+        # Find king position and check if we're defending it
+        king_pos = None
+        for kr in range(8):
+            for kc in range(8):
+                kp = self.engine.board[kr][kc]
+                if kp and kp['type'] == 'k' and kp['color'] == my_color:
+                    king_pos = (kr, kc)
+                    break
+        
+        # Bonus for being near king (defensive position)
+        if king_pos and piece['type'] in ['n', 'b', 'p']:
+            dist = abs(tr - king_pos[0]) + abs(tc - king_pos[1])
+            if dist <= 2:
+                protection_bonus += 20  # Close to king
+        
+        self.engine.board[fr][fc] = saved_from
+        self.engine.board[tr][tc] = saved_to
+        
+        score += protection_bonus
+        
+        # === 12. PURPOSE CHECK - Penalize moves with no clear purpose ===
+        has_purpose = False
+        
+        # Purpose 1: Capturing
+        if target:
+            has_purpose = True
+        
+        # Purpose 2: Developing from back rank
+        back_rank = 7 if my_color == 'w' else 0
+        if fr == back_rank and piece['type'] in ['n', 'b']:
+            has_purpose = True
+        
+        # Purpose 3: Moving to or attacking center
+        if (tr, tc) in CENTER or (tr, tc) in EXTENDED_CENTER:
+            has_purpose = True
+        
+        # Purpose 4: Defending a piece under attack
+        for dr in range(8):
+            for dc in range(8):
+                fp = self.engine.board[dr][dc]
+                if fp and fp['color'] == my_color and fp['type'] != 'k':
+                    if self.engine.is_square_attacked(dr, dc, opp_color):
+                        # Check if our move adds defense
+                        for atk in our_attacks if 'our_attacks' in dir() else []:
+                            if atk['to'] == (dr, dc):
+                                has_purpose = True
+        
+        # Purpose 5: Castling
+        if move.get('castling'):
+            has_purpose = True
+        
+        # Purpose 6: Creating threats
+        if attacks_after > 0:
+            has_purpose = True
+        
+        # Purpose 7: Pawn push towards promotion
+        if piece['type'] == 'p':
+            promo_rank = 0 if my_color == 'w' else 7
+            if abs(tr - promo_rank) <= 3:
+                has_purpose = True
+        
+        # No purpose = heavy penalty
+        if not has_purpose:
+            score -= 100  # Pointless move!
+        
         return score
 
     def get_best_move(self):
@@ -384,10 +501,75 @@ class ChessAI:
         if not all_moves:
             return None
         
-        # Filter and sort moves
+        my_color = self.engine.turn
+        opp_color = 'b' if my_color == 'w' else 'w'
+        
+        # === PRIORITY 1: Check if we have a free capture ===
+        capture_moves = []
+        for m in all_moves:
+            tr, tc = m['to']
+            target = self.engine.board[tr][tc]
+            if target:
+                fr, fc = m['from']
+                attacker = self.engine.board[fr][fc]
+                if attacker:
+                    target_val = self._get_piece_value(target)
+                    attacker_val = self._get_piece_value(attacker)
+                    
+                    # Simulate the capture
+                    self.engine.make_move(m, switch_turn=True, record_history=True)
+                    # Check if our piece is safe after capture
+                    is_safe = not self.engine.is_square_attacked(tr, tc, opp_color)
+                    self.engine.undo_move()
+                    
+                    if is_safe:
+                        # Free capture! 
+                        capture_moves.append((m, target_val))
+                    elif target_val >= attacker_val:
+                        # Good trade
+                        capture_moves.append((m, target_val - attacker_val + 50))
+        
+        # Sort captures by value and take best one if it's good
+        if capture_moves:
+            capture_moves.sort(key=lambda x: x[1], reverse=True)
+            best_capture, best_val = capture_moves[0]
+            if best_val >= 100:  # At least a pawn's worth
+                return best_capture
+        
+        # === PRIORITY 2: Check if any of our pieces need to flee ===
+        for r in range(8):
+            for c in range(8):
+                piece = self.engine.board[r][c]
+                if piece and piece['color'] == my_color and piece['type'] != 'k':
+                    if self.engine.is_square_attacked(r, c, opp_color):
+                        # This piece is under attack - find escape moves
+                        my_val = self._get_piece_value(piece)
+                        escape_moves = []
+                        for m in all_moves:
+                            if m['from'] == (r, c):
+                                tr, tc = m['to']
+                                # Check if destination is safe
+                                if not self.engine.is_square_attacked(tr, tc, opp_color):
+                                    escape_moves.append(m)
+                        if escape_moves:
+                            # Return best escape (prefer one that also attacks)
+                            escape_moves.sort(key=lambda m: self._evaluate_tactical_move(m), reverse=True)
+                            return escape_moves[0]
+        
+        # === PRIORITY 3: Normal search with lookahead ===
         safe_moves = [m for m in all_moves if not self._is_losing_move(m)]
         moves_to_search = safe_moves if safe_moves else all_moves
-        moves_to_search.sort(key=lambda m: self._evaluate_tactical_move(m), reverse=True)
+        
+        # Better move ordering: captures first, then tactical moves
+        def move_priority(m):
+            tr, tc = m['to']
+            target = self.engine.board[tr][tc]
+            priority = self._evaluate_tactical_move(m)
+            if target:
+                priority += 1000  # Captures get huge priority in ordering
+            return priority
+        
+        moves_to_search.sort(key=move_priority, reverse=True)
         
         best_move = moves_to_search[0]
         best_value = -float('inf')
@@ -399,21 +581,67 @@ class ChessAI:
             if time.time() - self.start_time > self.max_time:
                 break
             
+            # === LOOKAHEAD: Simulate opponent's response ===
             self.engine.make_move(move, switch_turn=True, record_history=True)
+            
+            # Get opponent's best response
+            opp_moves = self.engine.get_all_legal_moves(self.engine.turn)
+            opp_threat = 0
+            for om in opp_moves[:5]:  # Check top 5 opponent moves
+                otr, otc = om['to']
+                our_piece = self.engine.board[otr][otc]
+                if our_piece and our_piece['color'] == my_color:
+                    opp_threat = max(opp_threat, self._get_piece_value(our_piece))
+            
             val = self.minimax(depth - 1, alpha, beta, False)
+            val -= opp_threat // 3  # Penalize moves that allow opponent threats
+            
             self.engine.undo_move()
             
             val += self._evaluate_tactical_move(move) // 2
+            
+            # Extra penalty for repetition
+            if self._is_repetitive_move(move):
+                val -= 200
             
             if val > best_value:
                 best_value = val
                 best_move = move
             alpha = max(alpha, best_value)
         
+        # Final safety check
         if self._is_losing_move(best_move) and safe_moves:
             best_move = safe_moves[0]
         
         return best_move
+    
+    def _is_repetitive_move(self, move):
+        """Check if this move creates a repetitive pattern"""
+        if len(self.engine.move_history) < 4:
+            return False
+        
+        fr, fc = move['from']
+        tr, tc = move['to']
+        
+        # Check if we're going back to a square we left recently
+        for i in range(min(4, len(self.engine.move_history))):
+            hist = self.engine.move_history[-(i+1)]
+            try:
+                cols = {'a': 0, 'b': 1, 'c': 2, 'd': 3, 'e': 4, 'f': 5, 'g': 6, 'h': 7}
+                h_fc = cols.get(hist[0], -1)
+                h_fr = 8 - int(hist[1])
+                h_tc = cols.get(hist[2], -1)
+                h_tr = 8 - int(hist[3])
+                
+                # If we're moving to where a recent move came from
+                if (tr, tc) == (h_fr, h_fc):
+                    return True
+                # If we're moving from where a recent move went to
+                if (fr, fc) == (h_tr, h_tc) and (tr, tc) == (h_fr, h_fc):
+                    return True
+            except:
+                pass
+        return False
 
     def minimax(self, depth, alpha, beta, is_max):
         if time.time() - self.start_time > self.max_time:
@@ -724,35 +952,20 @@ class ChessAI:
         return score if self.engine.turn == 'w' else -score
 
     def get_opening_move(self):
-        history = ''.join(self.engine.coordinate_history)
+        # Join move history with spaces (e.g. "e2e4 e7e5 g1f3")
+        history = ' '.join(self.engine.coordinate_history)
         
-        book = {
-            # White openings
-            "": ["e2e4", "d2d4", "c2c4", "g1f3"],
-            "e2e4": ["e7e5", "c7c5", "e7e6"],
-            "d2d4": ["d7d5", "g8f6", "e7e6"],
-            # Italian Game / Ruy Lopez
-            "e2e4e7e5": ["g1f3", "f1c4", "b1c3"],
-            "e2e4e7e5g1f3": ["b8c6", "g8f6"],
-            "e2e4e7e5g1f3b8c6": ["f1b5", "f1c4", "d2d4"],
-            "e2e4e7e5f1c4": ["g8f6", "b8c6"],  # Defend against Scholar's Mate
-            # Sicilian
-            "e2e4c7c5": ["g1f3", "b1c3", "d2d4"],
-            # Queen's Gambit
-            "d2d4d7d5": ["c2c4", "g1f3", "c1f4"],
-            "d2d4d7d5c2c4": ["e7e6", "c7c6"],
-            # Defense against Scholar's Mate (Qh5/Bc4 threats)
-            "e2e4e7e5d1h5": ["b8c6", "g8f6"],  # Block with knight
-            "e2e4e7e5f1c4b8c6d1h5": ["g7g6"],  # Defend f7
-        }
-        
-        if history in book:
-            move_str = random.choice(book[history])
-            move = self.engine.parse_move(move_str)
-            if move:
-                legal = self.engine.get_all_legal_moves(self.engine.turn)
-                for lm in legal:
-                    if lm['from'] == move['from'] and lm['to'] == move['to']:
-                        print(f"  [AI] Book: {move_str}")
-                        return lm
+        # Use global OPENING_BOOK from config.py
+        if history in OPENING_BOOK:
+            choices = OPENING_BOOK[history]
+            if choices:
+                # Random choice for variety (rotation)
+                move_str = random.choice(choices)
+                move = self.engine.parse_move(move_str)
+                if move:
+                    legal = self.engine.get_all_legal_moves(self.engine.turn)
+                    for lm in legal:
+                        if lm['from'] == move['from'] and lm['to'] == move['to']:
+                            print(f"  [AI] Book: {move_str} (Path: '{history}')")
+                            return lm
         return None

@@ -34,5 +34,41 @@ PST = {
     'k_mid': [[-30, -40, -40, -50, -50, -40, -40, -30], [-30, -40, -40, -50, -50, -40, -40, -30], [-30, -40, -40, -50, -50, -40, -40, -30], [-30, -40, -40, -50, -50, -40, -40, -30], [-20, -30, -30, -40, -40, -30, -30, -20], [-10, -20, -20, -20, -20, -20, -20, -10], [20, 20, 0, 0, 0, 0, 20, 20], [20, 30, 40, 0, 0, 40, 30, 20]],
     'k_end': [[-50, -40, -30, -20, -20, -30, -40, -50], [-30, -20, -10, 0, 0, -10, -20, -30], [-30, -10, 20, 30, 30, 20, -10, -30], [-30, -10, 30, 40, 40, 30, -10, -30], [-30, -10, 30, 40, 40, 30, -10, -30], [-30, -10, 20, 30, 30, 20, -10, -30], [-30, -30, 0, 0, 0, 0, -30, -30], [-50, -30, -30, -30, -30, -30, -30, -50]]
 }
-# Opening Book
-OPENING_BOOK = {"e2e4": ["e7e5", "c7c5"], "d2d4": ["d7d5", "g8f6"]}
+# Opening Book - Key: Sequence of moves so far, Value: List of possible next moves
+OPENING_BOOK = {
+    "": ["e2e4", "d2d4", "g1f3", "c2c4"], # Start
+    
+    # --- e4 Openings ---
+    "e2e4": ["e7e6", "c7c5", "e7e5", "c7c6"], 
+    
+    # 1. Italian Game & Ruy Lopez Path
+    "e2e4 e7e5": ["g1f3"],
+    "e2e4 e7e5 g1f3": ["b8c6"],
+    "e2e4 e7e5 g1f3 b8c6": ["f1c4", "f1b5"], # Bc4 = Italian, Bb5 = Ruy Lopez
+    
+    # 2. Sicilian Defense
+    "e2e4 c7c5": ["g1f3", "b1c3"],
+    "e2e4 c7c5 g1f3": ["d7d6", "e7e6", "b8c6"],
+    
+    # 3. French Defense
+    "e2e4 e7e6": ["d2d4"],
+    "e2e4 e7e6 d2d4": ["d7d5"],
+    
+    # --- d4 Openings ---
+    "d2d4": ["d7d5", "g8f6"],
+    
+    # 4. Slav Defense
+    "d2d4 d7d5": ["c2c4"],
+    "d2d4 d7d5 c2c4": ["c7c6"], # Slav
+    
+    # 5. Queen's Gambit / Nimzo-Indian
+    "d2d4 g8f6": ["c2c4"],
+    "d2d4 g8f6 c2c4": ["e7e6"],
+    
+    # --- Special Systems ---
+    "c2c4": ["e7e5", "c7c5"],
+    
+    # --- Tactical Defenses ---
+    "e2e4 e7e5 d1h5": ["b8c6"], # Protect e5
+    "e2e4 e7e5 f1c4 b8c6 d1h5": ["g7g6"] # Defend f7
+}
