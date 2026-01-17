@@ -282,6 +282,10 @@ class ChessGUI:
                     elif x < BOARD_SIZE:
                         c, r = x // CELL_SIZE, y // CELL_SIZE
                         
+                        # Validate coordinates
+                        if not (0 <= r < 8 and 0 <= c < 8):
+                            continue
+                        
                         if self.engine.game_active:
                             if (self.game_mode == 'PvP') or \
                                (self.game_mode == 'AI' and self.engine.turn == self.player_side):

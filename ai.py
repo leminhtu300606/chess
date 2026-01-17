@@ -10,6 +10,7 @@ SIMPLE_VALUES = {'p': 100, 'n': 300, 'b': 300, 'r': 500, 'q': 900, 'k': 10000}
 # Strategic squares
 CENTER = [(3, 3), (3, 4), (4, 3), (4, 4)]
 EXTENDED_CENTER = [(2, 2), (2, 3), (2, 4), (2, 5), (3, 2), (3, 5), (4, 2), (4, 5), (5, 2), (5, 3), (5, 4), (5, 5)]
+CORNER_SQUARES = [(0, 0), (0, 7), (7, 0), (7, 7)]
 
 class ChessAI:
     def __init__(self, engine):
@@ -179,35 +180,7 @@ class ChessAI:
                             if row == tr or col == tc:
                                 score += 25
         
-        # === NEW: PIECE BLOCKING PENALTY ===
-        # Check if this move blocks friendly long-range pieces (Bishop, Rook, Queen)
-        blocking_penalty = 0
-        for row in range(8):
-            for col in range(8):
-                fp = self.engine.board[row][col]
-                if fp and fp['color'] == my_color and fp['type'] in ['b', 'q', 'r'] and (row, col) != (fr, fc):
-                    # Check if (tr, tc) blocks the line of sight for this piece
-                    dr = tr - row
-                    dc = tc - col
-                    
-                    # Check if they are on same diagonal, rank or file
-                    is_diag = abs(dr) == abs(dc) and dr != 0
-                    is_line = (dr == 0 or dc == 0) and (dr != 0 or dc != 0)
-                    
-                    if (fp['type'] in ['b', 'q'] and is_diag) or (fp['type'] in ['r', 'q'] and is_line):
-                        # The move is on a line this piece could use
-                        # Penalty is higher if we're closer to the piece (blocking more potential)
-                        dist = max(abs(dr), abs(dc))
-                        # SEVERE PENALTY: blocks friendly piece's development
-                        # Penalty ranges from -150 (dist 1) to -50 (dist 4)
-                        blocking_penalty -= max(50, 180 - dist * 30)
-                        
-                        # Extra penalty for blocking a piece still on its home square
-                        home_row = 7 if my_color == 'w' else 0
-                        if row == home_row:
-                            blocking_penalty -= 50
-                            
-        score += blocking_penalty
+        # === REMOVED REDUNDANT PIECE BLOCKING PENALTY (Moved to evaluate()) ===
         
         # === NEW: ESCAPE ROUTE CHECK ===
         # After moving, does the piece have safe retreats?
@@ -324,6 +297,20 @@ class ChessAI:
                             undeveloped_pieces += 1
                     if undeveloped_pieces >= 2:
                         score -= 30  # Don't push side pawns before developing
+            
+            # === NEW: MISSED CASTLING PENALTY ===
+            # Check if castling was available for this turn
+            can_castle_k = self.engine.castling_rights[my_color]['k']
+            can_castle_q = self.engine.castling_rights[my_color]['q']
+            
+            if (can_castle_k or can_castle_q) and not move.get('castling'):
+                # Verify if it was actually legal right now (using simplified check)
+                king_pos = self.engine.find_king(my_color)
+                if king_pos:
+                    kr, kc = king_pos
+                    # If king is on home square, it's a potential castling miss
+                    if (my_color == 'w' and kr == 7) or (my_color == 'b' and kr == 0):
+                        score -= (SIMPLE_VALUES['k'] * 2) // 3
         
         # 7. Center control - Bonus for Occupying OR Attacking center
         if (tr, tc) in CENTER:
@@ -770,7 +757,12 @@ class ChessAI:
                 elif (r, c) in EXTENDED_CENTER:
                     piece_score += 15
                 
-                # === 2. PIECE MOBILITY ===
+                # === 1.5 CORNER PENALTY ===
+                if (r, c) in CORNER_SQUARES:
+                    # Subtract 1/2 of simple value if in corner
+                    piece_score -= base_val // 2
+                
+                # === 2. PIECE MOBILITY & BLOCKING PENALTY ===
                 if piece['type'] in ['n', 'b', 'r', 'q']:
                     moves = self.engine.get_piece_moves(r, c, check_legal=False)
                     mobility = len(moves)
@@ -780,6 +772,26 @@ class ChessAI:
                         w_mobility += mobility
                     else:
                         b_mobility += mobility
+                        
+                    # === NEW: 2/3 PIECE VALUE BLOCKING PENALTY ===
+                    # Check if this piece blocks other friendly long-range pieces
+                    for row in range(8):
+                        for col in range(8):
+                            fp = self.engine.board[row][col]
+                            if fp and fp['color'] == piece['color'] and fp['type'] in ['b', 'q', 'r'] and (row, col) != (r, c):
+                                dr, dc = r - row, c - col
+                                # Check if they are on same line
+                                is_diag = abs(dr) == abs(dc) and dr != 0
+                                is_line = (dr == 0 or dc == 0) and (dr != 0 or dc != 0)
+                                if (fp['type'] in ['b', 'q'] and is_diag) or (fp['type'] in ['r', 'q'] and is_line):
+                                    # To be BLOCKING, the piece must be "in front" of the long-range piece
+                                    # relative to the center or developed squares.
+                                    # Simplified: check distance to piece vs distance to board edge logic?
+                                    # Better: Just check if it's within distance 3.
+                                    dist = max(abs(dr), abs(dc))
+                                    if dist <= 3:
+                                        piece_score -= (base_val * 2) // 3
+                                        break
                 
                 # === 3. PIECE DEVELOPMENT ===
                 back_rank = 7 if piece['color'] == 'w' else 0
