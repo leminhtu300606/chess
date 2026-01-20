@@ -4,6 +4,7 @@ import pygame
 from config import *
 from engine import ChessEngine
 from ai import ChessAI
+from ai_rl import RLChessAI
 
 class ChessGUI:
     def __init__(self):
@@ -13,6 +14,7 @@ class ChessGUI:
         self.clock = pygame.time.Clock()
         self.engine = ChessEngine()
         self.ai = ChessAI(self.engine)
+        self.ai_rl = RLChessAI(self.engine)
         
         self.selected_square = None
         self.valid_moves = []
@@ -30,6 +32,7 @@ class ChessGUI:
         
         # Menu State
         self.selected_mode = 'AI'
+        self.ai_type = 'Supervised' # Supervised or RL
         self.selected_time = 600
         self.selected_side = 'w'
         
@@ -205,14 +208,19 @@ class ChessGUI:
         draw_option_group("1. Game Mode", [("Player vs AI", 'AI'), ("Player vs Player", 'PvP')], 
                          self.selected_mode, 120, 'selected_mode')
 
+        # 1b. AI Type (Only if AI mode selected)
+        if self.selected_mode == 'AI':
+            draw_option_group("1b. AI Type", [("Standard AI", 'Supervised'), ("Self-Play AI (RL)", 'RL')], 
+                             self.selected_ai_type_dummy if hasattr(self, 'selected_ai_type_dummy') else self.ai_type, 200, 'ai_type')
+
         # 2. Time Control
         draw_option_group("2. Time Control", [("1 Minute", 60), ("3 Minutes", 180), ("10 Minutes", 600), ("Unlimited", -1)], 
-                         self.selected_time, 250, 'selected_time')
+                         self.selected_time, 330, 'selected_time')
 
         # 3. Side Selection (Only valid for AI)
         if self.selected_mode == 'AI':
             draw_option_group("3. Choose Side", [("White", 'w'), ("Black", 'b'), ("Random", 'random')], 
-                             self.selected_side, 430, 'selected_side')
+                             self.selected_side, 450, 'selected_side')
         
         # Start Button
         btn_start = pygame.Rect(WINDOW_WIDTH//2 - 100, 600, 200, 60)
@@ -309,14 +317,15 @@ class ChessGUI:
                                             
                                             # Trigger AI
                                             if self.game_mode == 'AI' and self.engine.game_active:
-                                                 pygame.event.pump() # Prevent freeze
-                                                 time.sleep(0.1)
-                                                 aimove = self.ai.get_best_move()
-                                                 if aimove: 
-                                                     ai_color = 'b' if self.player_side == 'w' else 'w'
-                                                     # self.ai.record_position(aimove, ai_color)  # removed, not needed
-                                                     self.engine.make_move(aimove)
-                                                     if self.check_game_over(): self.engine.game_active = False
+                                                pygame.event.pump() # Prevent freeze
+                                                time.sleep(0.1)
+                                                current_ai = self.ai if self.ai_type == 'Supervised' else self.ai_rl
+                                                aimove = current_ai.get_best_move()
+                                                if aimove: 
+                                                    ai_color = 'b' if self.player_side == 'w' else 'w'
+                                                    # self.ai.record_position(aimove, ai_color)  # removed, not needed
+                                                    self.engine.make_move(aimove)
+                                                    if self.check_game_over(): self.engine.game_active = False
                                         break
                                 
                                 if not moved:
@@ -330,13 +339,14 @@ class ChessGUI:
 
             # AI Turn Trigger (for start of game if AI is White)
             if self.game_mode == 'AI' and self.engine.game_active and self.engine.turn != self.player_side:
-                 pygame.event.pump()
-                 aimove = self.ai.get_best_move()
-                 if aimove:
-                     ai_color = 'b' if self.player_side == 'w' else 'w'
-                     # self.ai.record_position(aimove, ai_color)  # removed, not needed
-                     self.engine.make_move(aimove)
-                     if self.check_game_over(): self.engine.game_active = False
+                pygame.event.pump()
+                current_ai = self.ai if self.ai_type == 'Supervised' else self.ai_rl
+                aimove = current_ai.get_best_move()
+                if aimove:
+                    ai_color = 'b' if self.player_side == 'w' else 'w'
+                    # self.ai.record_position(aimove, ai_color)  # removed, not needed
+                    self.engine.make_move(aimove)
+                    if self.check_game_over(): self.engine.game_active = False
 
             pygame.display.flip()
             self.clock.tick(60)
