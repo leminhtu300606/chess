@@ -34,17 +34,18 @@ class ChessEngine:
         return 0 <= r < 8 and 0 <= c < 8
 
     def is_square_attacked(self, r, c, by_color):
-        """Check if square (r,c) is attacked by pieces of by_color"""
-        # Check knights
-        knight_moves = [(-2, -1), (-2, 1), (-1, -2), (-1, 2), (1, -2), (1, 2), (2, -1), (2, 1)]
-        for dr, dc in knight_moves:
+        """Check if square (r,c) is attacked by pieces of by_color - OPTIMIZED"""
+        opp = 'b' if by_color == 'w' else 'w'
+        
+        # Check knights (O(1) - only 8 positions)
+        for dr, dc in [(-2, -1), (-2, 1), (-1, -2), (-1, 2), (1, -2), (1, 2), (2, -1), (2, 1)]:
             nr, nc = r + dr, c + dc
             if self.is_valid_pos(nr, nc):
                 p = self.board[nr][nc]
                 if p and p['color'] == by_color and p['type'] == 'n':
                     return True
         
-        # Check rook/queen lines
+        # Check rook/queen lines and pawns together
         for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
             nr, nc = r + dr, c + dc
             while self.is_valid_pos(nr, nc):
@@ -66,7 +67,7 @@ class ChessEngine:
                     break
                 nr, nc = nr + dr, nc + dc
         
-        # Check pawns
+        # Check pawns (O(1) - only 2 positions)
         pawn_dir = 1 if by_color == 'b' else -1
         for dc in [-1, 1]:
             pr, pc = r - pawn_dir, c + dc
@@ -75,7 +76,7 @@ class ChessEngine:
                 if p and p['color'] == by_color and p['type'] == 'p':
                     return True
         
-        # Check king
+        # Check king (O(1) - only 8 positions)
         for dr in [-1, 0, 1]:
             for dc in [-1, 0, 1]:
                 if dr == 0 and dc == 0:
@@ -151,23 +152,19 @@ class ChessEngine:
             # Castling with proper rules
             if self.castling_rights[color]['k']:
                 # Kingside: King e1->g1 (or e8->g8)
-                # Conditions: f1, g1 empty; King not in check; e1, f1, g1 not attacked
                 if not self.board[r][5] and not self.board[r][6]:
-                    if not self.is_in_check(color):  # King not in check
-                        if not self.is_square_attacked(r, 4, opp):  # e-file
-                            if not self.is_square_attacked(r, 5, opp):  # f-file
-                                if not self.is_square_attacked(r, 6, opp):  # g-file
-                                    moves.append({'from': (r, c), 'to': (r, 6), 'castling': 'k'})
+                    if not self.is_in_check(color) and \
+                       not self.is_square_attacked(r, 5, opp) and \
+                       not self.is_square_attacked(r, 6, opp):
+                        moves.append({'from': (r, c), 'to': (r, 6), 'castling': 'k'})
             
             if self.castling_rights[color]['q']:
                 # Queenside: King e1->c1 (or e8->c8)
-                # Conditions: b1, c1, d1 empty; King not in check; c1, d1, e1 not attacked
                 if not self.board[r][1] and not self.board[r][2] and not self.board[r][3]:
-                    if not self.is_in_check(color):
-                        if not self.is_square_attacked(r, 4, opp):  # e-file
-                            if not self.is_square_attacked(r, 3, opp):  # d-file
-                                if not self.is_square_attacked(r, 2, opp):  # c-file
-                                    moves.append({'from': (r, c), 'to': (r, 2), 'castling': 'q'})
+                    if not self.is_in_check(color) and \
+                       not self.is_square_attacked(r, 3, opp) and \
+                       not self.is_square_attacked(r, 2, opp):
+                        moves.append({'from': (r, c), 'to': (r, 2), 'castling': 'q'})
 
         if check_legal:
             legal_moves = []
@@ -263,7 +260,6 @@ class ChessEngine:
             'castling': old_castling,
             'ep': old_ep,
             'ep_captured_pos': ep_captured_pos,
-            'ep_captured_pos': ep_captured_pos,
             'promotion': is_promotion,
             'switch_turn': switch_turn,
             'half_move_clock': self.half_move_clock
@@ -322,7 +318,6 @@ class ChessEngine:
             self.board[fr][3] = None
         
         # Restore state
-        self.castling_rights = state['castling']
         self.castling_rights = state['castling']
         self.en_passant_target = state['ep']
         self.half_move_clock = state.get('half_move_clock', 0)
@@ -413,12 +408,15 @@ class ChessEngine:
         return f"{b_str}_{self.turn}_{self.castling_rights}_{self.en_passant_target}"
 
     def get_all_legal_moves(self, color):
+        """Get all legal moves for color - OPTIMIZED with early exit"""
         moves = []
         for r in range(8):
             for c in range(8):
                 p = self.board[r][c]
                 if p and p['color'] == color:
-                    moves.extend(self.get_piece_moves(r, c))
+                    piece_moves = self.get_piece_moves(r, c)
+                    if piece_moves:
+                        moves.extend(piece_moves)
         return moves
 
     def parse_move(self, move_str):

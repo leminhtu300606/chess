@@ -314,7 +314,7 @@ class ChessGUI:
                                                  aimove = self.ai.get_best_move()
                                                  if aimove: 
                                                      ai_color = 'b' if self.player_side == 'w' else 'w'
-                                                     self.ai.record_position(aimove, ai_color)
+                                                     # self.ai.record_position(aimove, ai_color)  # removed, not needed
                                                      self.engine.make_move(aimove)
                                                      if self.check_game_over(): self.engine.game_active = False
                                         break
@@ -334,7 +334,7 @@ class ChessGUI:
                  aimove = self.ai.get_best_move()
                  if aimove:
                      ai_color = 'b' if self.player_side == 'w' else 'w'
-                     self.ai.record_position(aimove, ai_color)
+                     # self.ai.record_position(aimove, ai_color)  # removed, not needed
                      self.engine.make_move(aimove)
                      if self.check_game_over(): self.engine.game_active = False
 
